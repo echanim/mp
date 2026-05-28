@@ -46,7 +46,7 @@
             - network:
                 id: "network-8"
               ipMode: "static"
-              ipAddress: "192.168.40.195"
+              ipAddress: "192.168.40.182"
           layoutSize: 1
           copies: 1
           labels: ["vmware-cham-server"]      
