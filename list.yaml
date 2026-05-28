@@ -1,0 +1,107 @@
+---
+- name: 1. Provision Type ID 조회
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/provision-types"
+    method: GET
+    headers: &api_headers
+      Authorization: "Bearer {{ morpheus_token }}"
+      Accept: "application/json"
+    validate_certs: false
+  register: req_prov
+
+- name: 1-1. Provision Type ID 저장
+  ansible.builtin.set_fact:
+    dynamic_prov_id: "{{ (req_prov.json.provisionTypes | selectattr('code', 'equalto', 'kvm') | first).id }}"
+
+- name: 2. Service Plan ID 조회 (동적으로 찾은 prov_id 사용)
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/service-plans?provisionTypeId={{ dynamic_prov_id }}"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_plan
+
+- name: 2-1. Service Plan ID 저장
+  ansible.builtin.set_fact:
+    dynamic_plan_id: "{{ (req_plan.json.servicePlans | selectattr('code', 'equalto', 'k8s') | first).id }}"
+
+- name: 3. Zone ID 조회
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/zones"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_zones
+
+- name: 3-1. Zone ID 저장
+  ansible.builtin.set_fact:
+    dynamic_zone_id: "{{ (req_zones.json.zones | selectattr('zoneType.name', 'equalto', 'Private Cloud') | first).id }}"
+
+- name: 4. Network ID 조회
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/networks"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_networks
+
+- name: 4-1. Network ID 저장 (json_query 사용)
+  ansible.builtin.set_fact:
+    dynamic_network_id: "{{ req_networks.json | json_query('networks[?contains(labels, `VM`)].id | [0]') }}"
+
+- name: 5. Datastore ID 조회
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/data-stores"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_datastores
+
+- name: 5-1. Datastore ID 저장
+  ansible.builtin.set_fact:
+    dynamic_datastore_id: "{{ (req_datastores.json.datastores | selectattr('zone.id', 'equalto', dynamic_zone_id | int) | first).id }}"
+    dynamic_datastore_type_id: "{{ (req_datastores.json.datastores | selectattr('zone.id', 'equalto', dynamic_zone_id | int) | first).datastoreType.id }}"
+
+- name: 6. Instance Type ID 조회
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/instance-types?max=100"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_inst_types
+
+- name: 6-1. Instance Type ID 저장
+  ansible.builtin.set_fact:
+    dynamic_inst_type_id: "{{ (req_inst_types.json.instanceTypes | selectattr('code', 'equalto', target_os_code) | first).id }}"
+    dynamic_inst_type_code: "{{ (req_inst_types.json.instanceTypes | selectattr('code', 'equalto', target_os_code) | first).code }}"    
+
+- name: 7. Layout ID 조회 (동적으로 찾은 inst_type_id 사용)
+  ansible.builtin.uri:
+    url: "{{ morpheus_base_url }}/library/instance-types/{{ dynamic_inst_type_id }}/layouts?max=100"
+    method: GET
+    headers: *api_headers
+    validate_certs: false
+  register: req_layouts
+
+- name: 7-1. Layout ID 저장
+  ansible.builtin.set_fact:
+    dynamic_layout_id: >-
+      {{ 
+        (req_layouts.json.instanceTypeLayouts 
+        | selectattr('provisionType.code', 'equalto', 'kvm') 
+        | selectattr('instanceVersion', 'equalto', target_os_version) 
+        | first).id 
+      }}
+
+- name: "✅ 모든 동적 ID 추출 성공! 결과 확인"
+  ansible.builtin.debug:
+    msg: 
+      - "Provision ID : {{ dynamic_prov_id }}"
+      - "Plan ID      : {{ dynamic_plan_id }}"
+      - "Zone ID      : {{ dynamic_zone_id }}"
+      - "Network ID   : {{ dynamic_network_id }}"
+      - "Datastore ID : {{ dynamic_datastore_id }}"
+      - "Datastore Type ID : {{ dynamic_datastore_type_id }}"
+      - "Inst Type ID : {{ dynamic_inst_type_id }}"
+      - "Layout ID    : {{ dynamic_layout_id }}"
+
